@@ -104,6 +104,7 @@ const checkoutHintInput = {
 };
 
 const config = {
+  hasExplicitBaseUrl: Boolean(process.env.UCP_BASE_URL),
   baseUrl: trimTrailingSlash(process.env.UCP_BASE_URL ?? "https://localhost:5001"),
   storefrontUrl: normalizeOptionalUrl(process.env.UCP_STOREFRONT_URL),
   storeId: process.env.UCP_STORE_ID,
@@ -767,7 +768,6 @@ async function trackOrder(input: {
   storefront_url?: string;
 }): Promise<unknown> {
   const lastCheckout = await loadLastCheckout();
-  const lookup = input.order_id ?? input.order_number;
   const cartId = input.cart_id ?? lastCheckout?.cart_id;
   const buyerId = input.buyer_id ?? lastCheckout?.buyer_id;
   const organizationId = input.organization_id ?? lastCheckout?.organization_id;
@@ -784,16 +784,28 @@ async function trackOrder(input: {
   appendOptional(params, "buyer_id", buyerId);
   appendOptional(params, "organization_id", organizationId);
 
-  if (lookup) {
+  if (input.order_id) {
     return {
       lookup: {
         order_id: input.order_id,
+        buyer_id: buyerId,
+        organization_id: organizationId,
+        language,
+      },
+      result: await ucpGet(`/ucp/v1/orders/${encodeURIComponent(input.order_id)}?${params}`, connection),
+    };
+  }
+
+  if (input.order_number) {
+    params.set("order_number", input.order_number);
+    return {
+      lookup: {
         order_number: input.order_number,
         buyer_id: buyerId,
         organization_id: organizationId,
         language,
       },
-      result: await ucpGet(`/ucp/v1/orders/${encodeURIComponent(lookup)}?${params}`, connection),
+      result: await ucpGet(`/ucp/v1/orders?${params}`, connection),
     };
   }
 
@@ -1129,6 +1141,10 @@ async function saveRuntimeContext(update: Partial<RuntimeContextState>): Promise
 async function getEffectiveBaseUrl(connection: ConnectionInput = {}): Promise<string> {
   if (connection.base_url) {
     return trimTrailingSlash(connection.base_url);
+  }
+
+  if (config.hasExplicitBaseUrl) {
+    return config.baseUrl;
   }
 
   const runtime = await loadRuntimeContext();
