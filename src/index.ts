@@ -949,25 +949,62 @@ async function ucpFetch(path: string, init: RequestInit, connection: ConnectionI
   }
 
   const baseUrl = await getEffectiveBaseUrl(connection);
-  const response = await fetch(`${baseUrl}${path}`, {
-    ...init,
-    headers,
-    dispatcher,
-  } as RequestInit & { dispatcher?: Agent });
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}${path}`, {
+      ...init,
+      headers,
+      dispatcher,
+    } as RequestInit & { dispatcher?: Agent });
+  } catch (error) {
+    return {
+      ok: false,
+      error: ucpError("invalid_request", `Unable to reach UCP base_url '${baseUrl}'.`, {
+        base_url: baseUrl,
+        path,
+        cause: error instanceof Error ? error.message : String(error),
+      }),
+    };
+  }
 
   const text = await response.text();
   const payload = parseJson(text);
 
   if (!response.ok) {
+    const error = isUcpError(payload)
+      ? payload
+      : ucpError("invalid_request", `UCP request failed with HTTP ${response.status} ${response.statusText}.`, {
+        base_url: baseUrl,
+        path,
+        status: response.status,
+        status_text: response.statusText,
+        body: text.slice(0, 1000),
+      });
+
     return {
       ok: false,
       status: response.status,
       statusText: response.statusText,
-      error: payload ?? text,
+      error,
     };
   }
 
   return payload ?? text;
+}
+
+function ucpError(code: string, message: string, details: JsonObject = {}): JsonObject {
+  return {
+    code,
+    message,
+    correlation_id: null,
+    details,
+  };
+}
+
+function isUcpError(value: unknown): value is JsonObject {
+  return isRecord(value)
+    && typeof value.code === "string"
+    && typeof value.message === "string";
 }
 
 function cartBody(input: {
